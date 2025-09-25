@@ -5,6 +5,8 @@ from torch.utils.data import TensorDataset, DataLoader, Subset
 import numpy as np
 from sklearn.model_selection import KFold #用于k折检验
 
+import torchvision.transforms.functional as TF
+import random
 #加载数据并处理
 def load_data(file_path):
     # 文件中是类似 0.0000/1.0000 的浮点数，用 numpy 读取为浮点
@@ -26,6 +28,33 @@ def preprocessing(data):
     return dataset
 
 dataset=preprocessing(data)
+
+def augment_dataset(dataset):
+    X_list, y_list = [], []
+    for X, y in dataset:
+        X_list.append(X)   # 原始
+        y_list.append(y)
+
+        # 左上旋转
+        angle1 = random.uniform(-10, -5)
+        X_rot1 = TF.rotate(X, angle1, interpolation=TF.InterpolationMode.BILINEAR)
+        X_list.append(X_rot1)
+        y_list.append(y)
+
+        # 左下旋转
+        angle2 = random.uniform(5, 10)
+        X_rot2 = TF.rotate(X, angle2, interpolation=TF.InterpolationMode.BILINEAR)
+        X_list.append(X_rot2)
+        y_list.append(y)
+
+    X_tensor = torch.stack(X_list)
+    y_tensor = torch.tensor(y_list, dtype=torch.long)
+    return TensorDataset(X_tensor, y_tensor)
+
+# 替换 dataset
+dataset = preprocessing(data)
+aug_dataset = augment_dataset(dataset)
+
 
 class SimpleCNN(nn.Module):
     def __init__(self):
@@ -95,5 +124,5 @@ def k_fold_cross_val(dataset, k=5, epochs=15):
     print(f"\nAverage Accuracy over {k}-folds: {np.mean(acc_scores):.4f}")
 
 # 运行
-k_fold_cross_val(dataset, k=5, epochs=15)
+k_fold_cross_val(aug_dataset, k=5, epochs=15)
 

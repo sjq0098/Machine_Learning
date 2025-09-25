@@ -1,11 +1,7 @@
 import numpy as np
-from collections import Counter
+from collections import Counter,defaultdict
 
-# 用于中级要求：使用 sklearn 的 KNN，对比 ACC 与 NMI
-from sklearn import neighbors
-from sklearn.model_selection import train_test_split,LeaveOneOut
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.metrics import accuracy_score, normalized_mutual_info_score
+from sklearn.metrics import  normalized_mutual_info_score
 
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="joblib")
@@ -53,8 +49,17 @@ def knn(vectors,labels,k):
         distances = np.linalg.norm(train_vecs - test_vec, axis=1)
         sorted_idx = np.argsort(distances)
         k_nearest = train_labels[sorted_idx[:k]]
+        weights = 1 / (distances[sorted_idx[:k]] + 1e-12)  # 防止除零
 
-        pred=Counter(k_nearest).most_common(1)[0][0]
+        # 对每个类别累计权重
+        class_weights = defaultdict(float)
+        for lbl, w in zip(k_nearest, weights):
+            class_weights[lbl] += w
+
+        # 选权重最大的类别
+        pred = max(class_weights.items(), key=lambda x: x[1])[0]
+
+        #pred=Counter(k_nearest).most_common(1)[0][0]
         preds.append(pred)
         if pred==test_label:
             correct+=1
@@ -65,40 +70,6 @@ def knn(vectors,labels,k):
     
     return acc,nmi_val,cen_val
 
-acc,nmi_val,cen_val=knn(vectors,labels,9)
-
-#将我们的实现与weka/sklearn的knn算法对比，主参考指标为acc，副指标为归一化互信息NMI、混淆熵CEN
-
-def sk_knn(vectors,labels,k):
-    clf=KNeighborsClassifier(n_neighbors=k)
-    loo=LeaveOneOut()
-    correct=0
-    preds=[]
-    for train_idx,test_idx in loo.split(vectors):
-        train_vecs=vectors[train_idx]
-        train_labels=labels[train_idx]
-        test_vec=vectors[test_idx]
-        test_label=labels[test_idx]
-        clf.fit(train_vecs,train_labels)
-        pred=clf.predict(test_vec)[0]
-        preds.append(pred)
-        if pred==test_label:
-            correct+=1
-    acc=correct/len(vectors)
-    nmi_val=nmi(labels,preds)
-    cen_val=cen(labels,preds)
-    return acc,nmi_val,cen_val
-
 for k in [3,5,7,9,11,13]:
     acc,nmi_val,cen_val=knn(vectors,labels,k)
     print("KNN (k=",k,") ACC =", acc, "| NMI =", nmi_val, "| CEN =", cen_val)
-
-'''
-for k in [5,7,9,13]:
-    acc,nmi_val,cen_val=sk_knn(vectors,labels,k)
-    print("SKlearn KNN (k=",k,") ACC =", acc, "| NMI =", nmi_val, "| CEN =", cen_val)
-'''
-
-
-
-
