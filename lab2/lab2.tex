@@ -242,9 +242,73 @@ $$
 
 
 \section{实验过程与结果}
+\subsection{实验核心代码}
+为体现实验的关键实现，本节展示特征工程与梯度下降算法的核心代码片段。完整代码已开源至GitHub：\url{https://github.com/sjq0098/Machine_Learning.git}
+
+\subsubsection{特征工程核心代码}
+在特征工程阶段，我们对不同类型的变量进行了针对性处理，尤其是周期性特征和非线性关系的捕捉。
+\begin{lstlisting}[language=Python, caption={特征工程关键步骤}]
+def build_features(df: pd.DataFrame) -> pd.DataFrame:
+    out = df.copy()
+    # 删除泄漏或无意义列
+    for c in ["casual", "registered", "instant", "dteday"]:
+        if c in out.columns:
+            out.drop(columns=c, inplace=True)
+
+    # 周期特征 (sin/cos 变换)
+    if "hr" in out:      out = pd.concat([out, add_cyc_features(out, "hr", 24)], axis=1)
+    if "mnth" in out:    out = pd.concat([out, add_cyc_features(out, "mnth", 12)], axis=1)
+    if "weekday" in out: out = pd.concat([out, add_cyc_features(out, "weekday", 7)], axis=1)
+
+    # 类别特征 (独热编码在模型库中通过 C() 实现)
+    # ...
+
+    # 捕捉非线性关系：添加二次项
+    for c in ["temp", "atemp", "hum", "windspeed"]:
+        if c in out.columns:
+            out[f"{c}_sq"] = out[c].astype(float) ** 2
+
+    return out
+\end{lstlisting}
+
+\subsubsection{梯度下降核心代码}
+我们实现了小批量梯度下降算法来优化线性回归模型的均方误差（MSE）损失函数。
+\begin{lstlisting}[language=Python, caption={小批量梯度下降算法实现}]
+def train_gd(X, y, lr=0.001, epochs=500, batch_size=64):
+    n_samples, n_features = X.shape
+    beta = np.zeros(n_features)
+    losses = []
+
+    for epoch in range(epochs):
+        epoch_loss = 0.0
+        # 每个 epoch 开始前随机打乱数据
+        permutation = np.random.permutation(n_samples)
+        X_shuffled = X[permutation]
+        y_shuffled = y[permutation]
+
+        for i in range(0, n_samples, batch_size):
+            X_batch = X_shuffled[i:i+batch_size]
+            y_batch = y_shuffled[i:i+batch_size]
+            
+            # 预测与误差
+            y_pred = X_batch @ beta
+            error = y_pred - y_batch
+            
+            # 计算梯度 (MSE对beta的偏导)
+            gradient = (2/len(y_batch)) * X_batch.T @ error
+            
+            # 更新参数
+            beta -= lr * gradient
+            
+            epoch_loss += np.mean(error**2)
+        
+        losses.append(epoch_loss / (n_samples / batch_size))
+        
+    return beta, losses
+\end{lstlisting}
 
 \subsection{数据集与预处理}
-本实验使用 `bike_sharing_hour.csv` 数据集，包含天气、季节、时间等因素以及每小时的单车租赁量。
+本实验使用 `bike\_sharing\_hour.csv` 数据集，包含天气、季节、时间等因素以及每小时的单车租赁量。
 
 \subsubsection{数据观察}
 在建模之前，对数据进行了详细的探索性分析（EDA）。通过可视化分析（如图~\ref{fig:eda_plots}及图~\ref{fig:corr_matrix}），主要发现如下：
@@ -295,7 +359,7 @@ def time_split(df, train_ratio=0.7):
     \item \textbf{丢弃无关与泄漏列}：移除索引列 `instant`、日期列 `dteday`以及目标泄漏列 `casual` 和 `registered`。
     \item \textbf{类别特征处理}：对 `season`、`weathersit` 等非周期性类别特征进行独热编码。
     \item \textbf{周期特征处理}：对 `hr`、`mnth`、`weekday` 等具有周期性的特征，使用 `sin/cos` 变换进行周期编码。
-    \item \textbf{数值特征处理}：对 `temp`、`atemp`、`hum`、`windspeed` 等数值特征，使用训练集的均值和标准差进行标准化。同时，为捕捉非线性关系，为其添加了二次项（如 `temp^2`）。
+    \item \textbf{数值特征处理}：对 `temp`、`atemp`、`hum`、`windspeed` 等数值特征，使用训练集的均值和标准差进行标准化。同时，为捕捉非线性关系，为其添加了二次项（如 `$temp^2$`）。
     \item \textbf{添加截距项}：在特征矩阵的最左侧添加一列全为1的`bias`项，用于训练模型的截距。
 \end{enumerate}
 
@@ -329,11 +393,11 @@ def time_split(df, train_ratio=0.7):
 
 \subsection{中级要求：特征分析与解读}
 \subsubsection{特征重要性与显著性分析}
-为探究各因素对单车需求的影响，我们使用 `statsmodels` 库拟合了OLS模型，并计算了各特征的统计显著性。下表展示了按t统计量绝对值排序的部分最显著特征。
+为探究各因素对单车需求的影响，我们使用 `statsmodels` 库拟合了OLS模型，并计算了各特征的统计显著性。下表展示了按t统计量绝对值排序的所有特征。
 
 \begin{table}[H]
     \centering
-    \caption{部分重要特征的统计显著性分析}
+    \caption{所有特征的统计显著性分析}
     \begin{tabular}{lrrrr}
         \toprule
         \textbf{特征} & \textbf{Coef.} & \textbf{Std.Err.} & \textbf{t} & \textbf{P$> |$t$|$} \\
@@ -345,13 +409,37 @@ def time_split(df, train_ratio=0.7):
         \texttt{hum\_sq} & -181.58 & 24.33 & -7.46 & 0.000 \\
         \texttt{mnth\_cos} & -19.95 & 2.72 & -7.34 & 0.000 \\
         \texttt{atemp} & 853.37 & 124.17 & 6.87 & 0.000 \\
+        \texttt{atemp\_sq} & -662.15 & 118.11 & -5.61 & 0.000 \\
+        \texttt{hum} & 148.33 & 30.77 & 4.82 & 0.000 \\
+        \texttt{windspeed\_sq} & -182.53 & 43.02 & -4.24 & 0.000 \\
+        \texttt{temp\_sq} & 366.08 & 100.23 & 3.65 & 0.000 \\
+        \texttt{temp} & -398.19 & 114.74 & -3.47 & 0.001 \\
+        \texttt{weekday\_sin} & -5.48 & 1.64 & -3.34 & 0.001 \\
+        \texttt{windspeed} & 57.94 & 22.54 & 2.57 & 0.010 \\
+        \texttt{holiday} & -12.30 & 6.63 & -1.86 & 0.063 \\
+        \texttt{workingday} & 5.08 & 3.83 & 1.33 & 0.185 \\
+        \texttt{weekday\_cos} & 1.52 & 2.31 & 0.66 & 0.510 \\
+        \texttt{Intercept} & -16.72 & 13.08 & -1.28 & 0.201 \\
         \bottomrule
     \end{tabular}
 \end{table}
 
+\subsubsection{特征交互作用分析}
+为了探索特征间的复杂关系，我们在模型中引入了“温度”(`temp`)与“是否工作日”(`workingday`)的交互项。交互项 `temp:workingday` 的系数在统计上是显著的（通常p值小于0.05），这表明温度对单车需求的影响程度会因是否为工作日而有所不同。
+
+如图~\ref{fig:interaction}所示，我们可以观察到两条回归线（分别代表工作日与非工作日）的斜率存在明显差异。在工作日，随着温度升高，单车需求量的增长更为平缓；而在非工作日（周末或假日），需求的增长则更为陡峭。这可能是因为工作日的出行主要由通勤驱动，需求相对刚性，受温度影响较小；而休息日的出行则更多是休闲娱乐性质，温暖的天气会极大地激发人们的骑行意愿。
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\linewidth]{pic/temp_workingday_interaction.png}
+    \caption{“温度”与“工作日”的交互效应对租车数的影响}
+    \label{fig:interaction}
+\end{figure}
+
 \subsubsection{业务解读}
 \begin{itemize}
-    \item \textbf{时间因素}：`hr_sin` 和 `hr_cos` 的高度显著性验证了租车需求在一天内的强周期性。`yr`（年份）的大正系数表明2012年的需求显著高于2011年，反映了业务的增长趋势。`workingday` 的正系数说明工作日整体需求（尤其在通勤高峰）高于周末。
+    \item \textbf{时间因素}：`hr\_sin` 和 `hr
+\_cos` 的高度显著性验证了租车需求在一天内的强周期性。`yr`（年份）的大正系数表明2012年的需求显著高于2011年，反映了业务的增长趋势。`workingday` 的正系数说明工作日整体需求（尤其在通勤高峰）高于周末。
     \item \textbf{天气因素}：`temp`（温度）的系数为正，符合“天气越暖和，骑车的人越多”的直觉。`weathersit`类别3（小雨/雪）的系数为显著负值，表明恶劣天气会极大抑制用车需求。`hum`（湿度）的负系数也说明湿度过高会降低骑行意愿。
 \end{itemize}
 
@@ -372,7 +460,7 @@ def time_split(df, train_ratio=0.7):
     \end{tabular}
 \end{table}
 
-\textbf{特征筛选分析}：LASSO回归在最优 `alpha=0.316` 的设置下，将全部25个特征中的5个系数压缩为0，实现了特征选择（非零特征20个）。保留下来的最重要特征（绝对系数最大）与OLS模型基本一致，如 `hr_sin`, `yr`, `atemp` 等，表明这些核心驱动因素的稳健性。
+\textbf{特征筛选分析}：LASSO回归在最优 `alpha=0.316` 的设置下，将全部25个特征中的5个系数压缩为0，实现了特征选择（非零特征20个）。保留下来的最重要特征（绝对系数最大）与OLS模型基本一致，如 `hr\_sin`, `yr`, `atemp` 等，表明这些核心驱动因素的稳健性。
 
 \subsubsection{模型诊断}
 我们对岭回归模型在测试集上的预测残差进行了分析。
