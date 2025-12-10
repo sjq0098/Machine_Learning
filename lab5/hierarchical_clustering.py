@@ -35,28 +35,19 @@ class HierarchicalClustering:
         执行层次聚类
         """
         n_samples = X.shape[0]
-
-        # 计算点对距离矩阵（原始样本之间）
         distances = pdist(X, metric=self.metric)
         distance_matrix = squareform(distances)
 
-        # 初始化簇和相关数据结构
-        clusters = {i: [i] for i in range(n_samples)}  # 簇中的样本索引
-        active_nodes = list(range(n_samples))          # 当前还存在的“簇节点”
-
+        clusters = {i: [i] for i in range(n_samples)}
+        active_nodes = list(range(n_samples))
         Z = []
 
-        # 关键修改：预留足够大的距离矩阵空间
-        # 层次聚类会产生最多 2*n_samples-1 个节点，这里简单开到 2*n_samples
         max_nodes = 2 * n_samples
-        D = np.full((max_nodes, max_nodes), np.inf)    # 先全部设为无穷大
-        D[:n_samples, :n_samples] = distance_matrix    # 把原始样本间距离填进去
+        D = np.full((max_nodes, max_nodes), np.inf)
+        D[:n_samples, :n_samples] = distance_matrix
+        node_id = n_samples
 
-        node_id = n_samples  # 新簇的ID（从n_samples开始）
-
-        # 逐步合并簇
         while len(active_nodes) > 1:
-            # 找到距离最小的两个簇
             min_dist = np.inf
             merge_i, merge_j = -1, -1
 
@@ -67,7 +58,6 @@ class HierarchicalClustering:
                         merge_i = i
                         merge_j = j
 
-            # 记录合并信息
             Z.append([
                 merge_i,
                 merge_j,
@@ -75,11 +65,9 @@ class HierarchicalClustering:
                 len(clusters[merge_i]) + len(clusters[merge_j])
             ])
 
-            # 合并两个簇
             new_cluster = clusters[merge_i] + clusters[merge_j]
             clusters[node_id] = new_cluster
 
-            # 计算新簇到其他簇的距离
             new_active_nodes = []
             for k in active_nodes:
                 if k != merge_i and k != merge_j:
@@ -92,18 +80,14 @@ class HierarchicalClustering:
                     else:
                         raise ValueError(f"未知链接方法: {self.method}")
 
-                    # 更新距离矩阵（不再越界）
                     D[node_id, k] = d
                     D[k, node_id] = d
                     new_active_nodes.append(k)
 
             new_active_nodes.append(node_id)
             active_nodes = new_active_nodes
-
-            # 删除已合并的簇
             del clusters[merge_i]
             del clusters[merge_j]
-
             node_id += 1
 
         self.Z = np.array(Z)
@@ -171,7 +155,6 @@ def load_and_prepare_wine_data():
 def plot_comparison(X, y, n_clusters=3):
     """绘制三种方法的聚类结果对比"""
     
-    # 初始化三个聚类对象
     methods = ['single', 'complete', 'average']
     clusterings = {}
     labels_dict = {}
@@ -182,11 +165,9 @@ def plot_comparison(X, y, n_clusters=3):
         clusterings[method] = hc
         labels_dict[method] = hc.predict(n_clusters=n_clusters)
     
-    # 绘制聚类结果
     fig, axes = plt.subplots(2, 3, figsize=(15, 10))
     fig.suptitle('层次聚类三种链接方法对比 (Wine数据集)', fontsize=16, fontweight='bold')
     
-    # 第一行：树状图
     for idx, method in enumerate(methods):
         ax = axes[0, idx]
         dendrogram(clusterings[method].Z, ax=ax, no_labels=True)
@@ -194,7 +175,6 @@ def plot_comparison(X, y, n_clusters=3):
         ax.set_xlabel('样本索引')
         ax.set_ylabel('距离')
     
-    # 第二行：聚类结果散点图（前两个特征）
     for idx, method in enumerate(methods):
         ax = axes[1, idx]
         labels = labels_dict[method]
@@ -208,7 +188,7 @@ def plot_comparison(X, y, n_clusters=3):
     
     plt.tight_layout()
     plt.savefig('clustering_comparison_basic.png', dpi=300, bbox_inches='tight')
-    print("✓ 基本对比图已保存: clustering_comparison_basic.png")
+    print("基本对比图已保存: clustering_comparison_basic.png")
     plt.show()
     
     return clusterings, labels_dict
@@ -241,4 +221,4 @@ if __name__ == "__main__":
     for method in ['single', 'complete', 'average']:
         evaluate_clustering(X, labels_dict[method], method.capitalize())
     
-    print("\n✓ 实验完成！")
+    print("\n实验完成！")

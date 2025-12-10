@@ -9,7 +9,6 @@ import time
 import seaborn as sns
 from hierarchical_clustering import HierarchicalClustering
 
-#支持中文画图：
 plt.rcParams['font.sans-serif'] = ['SimHei']
 plt.rcParams['axes.unicode_minus'] = False
 
@@ -26,7 +25,6 @@ class DetailedClusteringAnalysis:
         """生成多种特征的测试数据集"""
         datasets = {}
         
-        # 1. Wine数据集
         wine = load_wine()
         scaler = StandardScaler()
         datasets['Wine'] = {
@@ -37,7 +35,6 @@ class DetailedClusteringAnalysis:
             'shape': '高维(13特征), 178样本'
         }
         
-        # 2. 高斯球形簇
         X_blob, y_blob = make_blobs(n_samples=200, centers=4, 
                                      n_features=2, random_state=42)
         datasets['Blobs'] = {
@@ -48,7 +45,6 @@ class DetailedClusteringAnalysis:
             'shape': '2D, 200样本, 4个簇'
         }
         
-        # 3. 非球形簇（月牙形）
         X_moons, y_moons = make_moons(n_samples=300, noise=0.05, random_state=42)
         datasets['Moons'] = {
             'data': StandardScaler().fit_transform(X_moons),
@@ -58,7 +54,6 @@ class DetailedClusteringAnalysis:
             'shape': '2D, 300样本, 2个簇'
         }
         
-        # 4. 高维数据
         X_high, y_high = make_blobs(n_samples=150, centers=5, 
                                      n_features=10, random_state=42)
         datasets['HighDim'] = {
@@ -69,10 +64,8 @@ class DetailedClusteringAnalysis:
             'shape': '10D, 150样本, 5个簇'
         }
         
-        # 5. 带异常点的数据
         X_blob2, y_blob2 = make_blobs(n_samples=150, centers=3, 
                                        n_features=2, random_state=42)
-        # 添加异常点
         outliers = np.random.uniform(-10, 10, (10, 2))
         X_outlier = np.vstack([X_blob2, outliers])
         y_outlier = np.hstack([y_blob2, np.full(10, -1)])
@@ -97,7 +90,7 @@ class DetailedClusteringAnalysis:
             times.append(time.time() - start)
 
         avg_time = np.mean(times)
-        space = X.nbytes  # 粗略估计
+        space = X.nbytes
 
         return avg_time, space
     
@@ -125,24 +118,21 @@ class DetailedClusteringAnalysis:
             print(f"\n{method.upper()}-LINKAGE 分析:")
             print("-" * 50)
 
-            # 测量时间复杂度
             avg_time, _ = self.measure_complexity(X, method)
 
-            # 执行聚类（使用自己的实现）
             hc = HierarchicalClustering(method=method)
             hc.fit(X)
             labels = hc.predict(n_clusters)
             Z = hc.Z
 
-            # 计算评估指标
             silhouette = silhouette_score(X, labels)
             davies_bouldin = davies_bouldin_score(X, labels)
             calinski_harabasz = calinski_harabasz_score(X, labels)
             
             print(f"  执行时间: {avg_time*1000:.2f} ms")
-            print(f"  Silhouette Score: {silhouette:.4f}  ↑越好")
-            print(f"  Davies-Bouldin Index: {davies_bouldin:.4f}  ↓越好")
-            print(f"  Calinski-Harabasz Index: {calinski_harabasz:.2f}  ↑越好")
+            print(f"  Silhouette Score: {silhouette:.4f}")
+            print(f"  Davies-Bouldin Index: {davies_bouldin:.4f}")
+            print(f"  Calinski-Harabasz Index: {calinski_harabasz:.2f}")
             
             results[f'{method}_time'] = avg_time
             results[f'{method}_silhouette'] = silhouette
@@ -172,7 +162,6 @@ class DetailedClusteringAnalysis:
     def plot_comprehensive_results(self, all_results, datasets):
         """绘制全面的对比图"""
         
-        # 提取数据用于绘图
         df_data = []
         for result in all_results:
             dataset_name = result['dataset']
@@ -188,47 +177,41 @@ class DetailedClusteringAnalysis:
         
         df = pd.DataFrame(df_data)
         
-        # 绘制四个子图
         fig, axes = plt.subplots(2, 2, figsize=(16, 12))
         fig.suptitle('层次聚类三种方法详细对比分析', fontsize=16, fontweight='bold')
         
-        # 1. Silhouette Score对比
         ax = axes[0, 0]
         sns.barplot(data=df, x='Dataset', y='Silhouette', hue='Method', ax=ax)
-        ax.set_title('Silhouette Score对比 (越高越好)', fontweight='bold')
+        ax.set_title('Silhouette Score对比', fontweight='bold')
         ax.set_ylabel('Silhouette Score')
         ax.legend(loc='best')
         
-        # 2. Davies-Bouldin Index对比
         ax = axes[0, 1]
         sns.barplot(data=df, x='Dataset', y='Davies-Bouldin', hue='Method', ax=ax)
-        ax.set_title('Davies-Bouldin Index对比 (越低越好)', fontweight='bold')
+        ax.set_title('Davies-Bouldin Index对比', fontweight='bold')
         ax.set_ylabel('Davies-Bouldin Index')
         ax.legend(loc='best')
         
-        # 3. Calinski-Harabasz Index对比
         ax = axes[1, 0]
         sns.barplot(data=df, x='Dataset', y='Calinski-Harabasz', hue='Method', ax=ax)
-        ax.set_title('Calinski-Harabasz Index对比 (越高越好)', fontweight='bold')
+        ax.set_title('Calinski-Harabasz Index对比', fontweight='bold')
         ax.set_ylabel('Calinski-Harabasz Index')
         ax.legend(loc='best')
         
-        # 4. 时间复杂度对比
         ax = axes[1, 1]
         sns.barplot(data=df, x='Dataset', y='Time (ms)', hue='Method', ax=ax)
-        ax.set_title('执行时间对比 (ms)', fontweight='bold')
+        ax.set_title('执行时间对比', fontweight='bold')
         ax.set_ylabel('时间 (毫秒)')
         ax.legend(loc='best')
         
         plt.tight_layout()
         plt.savefig('comprehensive_analysis.png', dpi=300, bbox_inches='tight')
-        print("\n✓ 全面对比图已保存: comprehensive_analysis.png")
+        print("\n全面对比图已保存: comprehensive_analysis.png")
         plt.show()
     
     def plot_dataset_visualizations(self, all_results, datasets):
         """绘制各数据集及其聚类结果"""
         
-        # 只绘制2D数据集
         dataset_names = ['Blobs', 'Moons', 'Outliers']
         
         fig, axes = plt.subplots(len(dataset_names), 4, figsize=(16, 12))
@@ -240,14 +223,12 @@ class DetailedClusteringAnalysis:
             
             X = datasets[name]['data']
             
-            # 第1列：原始数据
             ax = axes[row, 0]
             ax.scatter(X[:, 0], X[:, 1], alpha=0.6, s=30)
             ax.set_title(f'{name} - 原始数据')
             ax.set_xticks([])
             ax.set_yticks([])
             
-            # 后3列：三种方法的聚类结果
             result = next(r for r in all_results if r['dataset'] == name)
             
             for col, method in enumerate(['single', 'complete', 'average']):
@@ -261,22 +242,16 @@ class DetailedClusteringAnalysis:
         
         plt.tight_layout()
         plt.savefig('dataset_visualizations.png', dpi=300, bbox_inches='tight')
-        print("✓ 数据集可视化已保存: dataset_visualizations.png")
+        print("数据集可视化已保存: dataset_visualizations.png")
         plt.show()
     
     def plot_cluster_distributions(self, all_results, datasets, method='average'):
-        """
-        查看每个聚类的分布情况：
-        - 聚类样本数条形图
-        - 前4个特征的箱线图分布
-        默认使用指定的method（推荐 'average'），可按需切换 'single'/'complete'。
-        """
+        """查看每个聚类的分布情况"""
         for name, dataset in datasets.items():
             result = next(r for r in all_results if r['dataset'] == name)
             labels = result[f'{method}_labels']
             X = dataset['data']
             
-            # 聚类大小可视化
             unique, counts = np.unique(labels, return_counts=True)
             fig, axes = plt.subplots(1, 2, figsize=(14, 5))
             sns.barplot(x=unique, y=counts, ax=axes[0], palette='viridis')
@@ -284,7 +259,6 @@ class DetailedClusteringAnalysis:
             axes[0].set_xlabel('Cluster')
             axes[0].set_ylabel('Count')
             
-            # 特征分布可视化（取前4个特征以保持可读性）
             max_features = min(4, X.shape[1])
             feature_cols = [f'feat_{i}' for i in range(max_features)]
             df = pd.DataFrame(X[:, :max_features], columns=feature_cols)
@@ -297,7 +271,7 @@ class DetailedClusteringAnalysis:
             plt.tight_layout()
             outfile = f'{name}_{method}_cluster_distribution.png'
             plt.savefig(outfile, dpi=300, bbox_inches='tight')
-            print(f"✓ 聚类分布图已保存: {outfile}")
+            print(f"聚类分布图已保存: {outfile}")
             plt.show()
     
 
@@ -306,9 +280,7 @@ if __name__ == "__main__":
     analyzer = DetailedClusteringAnalysis()
     all_results, datasets = analyzer.run_comprehensive_analysis()
     
-    # 绘制结果
     analyzer.plot_comprehensive_results(all_results, datasets)
     analyzer.plot_dataset_visualizations(all_results, datasets)
-    # 查看每个聚类的分布情况（默认 average，可改为 single/complete）
     analyzer.plot_cluster_distributions(all_results, datasets, method='average')
     
