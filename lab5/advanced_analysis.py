@@ -264,6 +264,42 @@ class DetailedClusteringAnalysis:
         print("✓ 数据集可视化已保存: dataset_visualizations.png")
         plt.show()
     
+    def plot_cluster_distributions(self, all_results, datasets, method='average'):
+        """
+        查看每个聚类的分布情况：
+        - 聚类样本数条形图
+        - 前4个特征的箱线图分布
+        默认使用指定的method（推荐 'average'），可按需切换 'single'/'complete'。
+        """
+        for name, dataset in datasets.items():
+            result = next(r for r in all_results if r['dataset'] == name)
+            labels = result[f'{method}_labels']
+            X = dataset['data']
+            
+            # 聚类大小可视化
+            unique, counts = np.unique(labels, return_counts=True)
+            fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+            sns.barplot(x=unique, y=counts, ax=axes[0], palette='viridis')
+            axes[0].set_title(f'{name} - {method.capitalize()} 聚类大小')
+            axes[0].set_xlabel('Cluster')
+            axes[0].set_ylabel('Count')
+            
+            # 特征分布可视化（取前4个特征以保持可读性）
+            max_features = min(4, X.shape[1])
+            feature_cols = [f'feat_{i}' for i in range(max_features)]
+            df = pd.DataFrame(X[:, :max_features], columns=feature_cols)
+            df['cluster'] = labels
+            df_melt = df.melt(id_vars='cluster', var_name='feature', value_name='value')
+            sns.boxplot(data=df_melt, x='feature', y='value', hue='cluster', ax=axes[1])
+            axes[1].set_title(f'{name} - {method.capitalize()} 聚类特征分布')
+            axes[1].legend(title='Cluster', bbox_to_anchor=(1.05, 1), loc='upper left')
+            
+            plt.tight_layout()
+            outfile = f'{name}_{method}_cluster_distribution.png'
+            plt.savefig(outfile, dpi=300, bbox_inches='tight')
+            print(f"✓ 聚类分布图已保存: {outfile}")
+            plt.show()
+    
 
 
 if __name__ == "__main__":
@@ -273,4 +309,6 @@ if __name__ == "__main__":
     # 绘制结果
     analyzer.plot_comprehensive_results(all_results, datasets)
     analyzer.plot_dataset_visualizations(all_results, datasets)
+    # 查看每个聚类的分布情况（默认 average，可改为 single/complete）
+    analyzer.plot_cluster_distributions(all_results, datasets, method='average')
     
