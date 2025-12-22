@@ -3,7 +3,6 @@ import pandas as pd
 from collections import Counter
 
 
-# ========== 树节点类 ==========
 class TreeNodeC45:
     """
     C4.5决策树节点类
@@ -28,7 +27,6 @@ class TreeNodeC45:
         self.class_distribution = class_distribution or {}
 
 
-# ========== C4.5决策树分类器 ==========
 class DecisionTreeC45:
     """
     C4.5决策树分类器
@@ -221,26 +219,15 @@ class DecisionTreeC45:
         
         for feature in available_features:
             if self.feature_types[feature] == 'continuous':
-                # 连续特征
                 threshold, gain_ratio = self.find_best_threshold(X, y, feature)
-                if threshold is not None:
-                    print(f"  特征 '{feature}' (连续, 阈值={threshold:.4f}) 的增益率: {gain_ratio:.4f}")
             else:
-                # 离散特征
                 gain_ratio = self.calculate_gain_ratio(X, y, feature, None)
                 threshold = None
-                print(f"  特征 '{feature}' (离散) 的增益率: {gain_ratio:.4f}")
             
             if gain_ratio > best_gain_ratio:
                 best_gain_ratio = gain_ratio
                 best_feature = feature
                 best_threshold = threshold
-        
-        if best_feature:
-            if best_threshold is not None:
-                print(f"  → 选择特征: {best_feature} (连续, 阈值={best_threshold:.4f}, 增益率={best_gain_ratio:.4f})\n")
-            else:
-                print(f"  → 选择特征: {best_feature} (离散, 增益率={best_gain_ratio:.4f})\n")
         
         return best_feature, best_threshold
     
@@ -248,39 +235,28 @@ class DecisionTreeC45:
         """
         递归构建决策树
         """
-        indent = "  " * depth
         class_dist = dict(Counter(y))
         n_samples = len(y)
-        
-        print(f"{indent}构建节点 [深度={depth}, 样本数={n_samples}, 类别分布={class_dist}]")
         
         # 终止条件1：所有样本属于同一类别
         if len(np.unique(y)) == 1:
             label = y.iloc[0]
-            print(f"{indent}→ 叶子节点: {label}\n")
             return TreeNodeC45(label=label, samples=n_samples, class_distribution=class_dist)
         
-        # 终止条件2：达到最大深度
         if self.max_depth is not None and depth >= self.max_depth:
             most_common_label = Counter(y).most_common(1)[0][0]
-            print(f"{indent}→ 叶子节点（达到最大深度）: {most_common_label}\n")
             return TreeNodeC45(label=most_common_label, samples=n_samples, class_distribution=class_dist)
         
-        # 终止条件3：样本数太少
         if len(available_features) == 0 or n_samples < self.min_samples_split:
             most_common_label = Counter(y).most_common(1)[0][0]
-            print(f"{indent}→ 叶子节点（终止条件）: {most_common_label}\n")
             return TreeNodeC45(label=most_common_label, samples=n_samples, class_distribution=class_dist)
         
-        # 选择最佳特征
         best_feature, best_threshold = self.select_best_feature(X, y, available_features)
         
         if best_feature is None:
             most_common_label = Counter(y).most_common(1)[0][0]
-            print(f"{indent}→ 叶子节点（无有效特征）: {most_common_label}\n")
             return TreeNodeC45(label=most_common_label, samples=n_samples, class_distribution=class_dist)
         
-        # 创建节点
         is_continuous = (best_threshold is not None)
         node = TreeNodeC45(
             feature=best_feature,
@@ -291,8 +267,6 @@ class DecisionTreeC45:
         )
         
         if is_continuous:
-            # 连续特征：二分裂
-            print(f"{indent}分支: {best_feature} <= {best_threshold:.4f}")
             left_indices = X[best_feature] <= best_threshold
             left_X = X[left_indices]
             left_y = y[left_indices]
@@ -302,8 +276,6 @@ class DecisionTreeC45:
             else:
                 most_common = Counter(y).most_common(1)[0][0]
                 node.children['left'] = TreeNodeC45(label=most_common, samples=len(left_y))
-            
-            print(f"{indent}分支: {best_feature} > {best_threshold:.4f}")
             right_indices = X[best_feature] > best_threshold
             right_X = X[right_indices]
             right_y = y[right_indices]
@@ -314,12 +286,10 @@ class DecisionTreeC45:
                 most_common = Counter(y).most_common(1)[0][0]
                 node.children['right'] = TreeNodeC45(label=most_common, samples=len(right_y))
         else:
-            # 离散特征：多路分裂
             feature_values = X[best_feature].unique()
             remaining_features = [f for f in available_features if f != best_feature]
             
             for value in feature_values:
-                print(f"{indent}分支: {best_feature} = {value}")
                 indices = X[best_feature] == value
                 subset_X = X[indices]
                 subset_y = y[indices]
@@ -342,19 +312,7 @@ class DecisionTreeC45:
         X = X.reset_index(drop=True)
         y = y.reset_index(drop=True)
         
-        print("\n" + "=" * 60)
-        print("开始构建C4.5决策树...")
-        print("=" * 60)
-        print("\n特征类型识别结果:")
-        for feature, ftype in self.feature_types.items():
-            print(f"  {feature}: {ftype}")
-        print()
-        
         self.root = self.build_tree(X, y, self.feature_names)
-        
-        print("=" * 60)
-        print(f"C4.5决策树训练完成！")
-        print("=" * 60)
     
     def predict_sample(self, x, node):
         """
@@ -436,10 +394,6 @@ class DecisionTreeC45:
 
 # ========== 测试代码 ==========
 if __name__ == "__main__":
-    print("\n" + "=" * 60)
-    print("C4.5决策树分类器测试 - 西瓜数据集2")
-    print("=" * 60)
-    
     # 加载数据
     train_data = pd.read_csv('Watermelon-train2.csv')
     test_data = pd.read_csv('Watermelon-test2.csv')
@@ -449,10 +403,6 @@ if __name__ == "__main__":
     
     X_test = test_data.drop(['编号', '好瓜'], axis=1)
     y_test = test_data['好瓜']
-    
-    print(f"\n训练集大小: {X_train.shape[0]} 个样本")
-    print(f"测试集大小: {X_test.shape[0]} 个样本")
-    print(f"特征: {X_train.columns.tolist()}")
     
     # 训练C4.5决策树
     tree = DecisionTreeC45(
@@ -474,10 +424,4 @@ if __name__ == "__main__":
     test_pred = tree.predict(X_test)
     test_acc = np.mean(test_pred == y_test.values)
     print(f"测试集准确率: {test_acc:.2%}")
-    
-    print("\n详细预测结果:")
-    print("-" * 40)
-    for i in range(len(test_pred)):
-        correct = "✓" if test_pred[i] == y_test.iloc[i] else "✗"
-        print(f"样本{i+1}: 真实={y_test.iloc[i]}, 预测={test_pred[i]} {correct}")
 

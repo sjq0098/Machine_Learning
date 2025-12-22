@@ -202,19 +202,11 @@ class DecisionTreeCART:
         
         for feature in available_features:
             if self.feature_types[feature] == 'continuous':
-                # 连续特征
                 threshold, gini = self.find_best_split_continuous(X, y, feature)
                 is_continuous = True
-                
-                if threshold is not None:
-                    print(f"  特征 '{feature}' (连续, 阈值={threshold:.4f}) 的基尼指数: {gini:.4f}")
             else:
-                # 离散特征
                 threshold, gini = self.find_best_split_discrete(X, y, feature)
                 is_continuous = False
-                
-                if threshold is not None:
-                    print(f"  特征 '{feature}' (离散, 分裂值={threshold}) 的基尼指数: {gini:.4f}")
             
             if gini < best_gini:
                 best_gini = gini
@@ -222,52 +214,35 @@ class DecisionTreeCART:
                 best_threshold = threshold
                 best_is_continuous = is_continuous
         
-        if best_feature:
-            if best_is_continuous:
-                print(f"  → 选择特征: {best_feature} (连续, 阈值={best_threshold:.4f}, 基尼={best_gini:.4f})\n")
-            else:
-                print(f"  → 选择特征: {best_feature} (离散, 分裂值={best_threshold}, 基尼={best_gini:.4f})\n")
-        
         return best_feature, best_threshold, best_is_continuous
     
     def build_tree(self, X, y, available_features, depth=0):
         """
         递归构建CART决策树（二叉树）
         """
-        indent = "  " * depth
         class_dist = dict(Counter(y))
         n_samples = len(y)
         gini = self.calculate_gini(y)
         
-        print(f"{indent}构建节点 [深度={depth}, 样本数={n_samples}, 基尼={gini:.4f}, 类别分布={class_dist}]")
-        
         # 终止条件1：所有样本属于同一类别
         if len(np.unique(y)) == 1:
             label = y.iloc[0]
-            print(f"{indent}→ 叶子节点: {label}\n")
             return TreeNodeCART(label=label, samples=n_samples, gini=gini, class_distribution=class_dist)
         
-        # 终止条件2：达到最大深度
         if self.max_depth is not None and depth >= self.max_depth:
             most_common_label = Counter(y).most_common(1)[0][0]
-            print(f"{indent}→ 叶子节点（达到最大深度）: {most_common_label}\n")
             return TreeNodeCART(label=most_common_label, samples=n_samples, gini=gini, class_distribution=class_dist)
         
-        # 终止条件3：样本数太少
         if len(available_features) == 0 or n_samples < self.min_samples_split:
             most_common_label = Counter(y).most_common(1)[0][0]
-            print(f"{indent}→ 叶子节点（终止条件）: {most_common_label}\n")
             return TreeNodeCART(label=most_common_label, samples=n_samples, gini=gini, class_distribution=class_dist)
         
-        # 选择最佳特征和分裂点
         best_feature, best_threshold, is_continuous = self.select_best_feature(X, y, available_features)
         
         if best_feature is None:
             most_common_label = Counter(y).most_common(1)[0][0]
-            print(f"{indent}→ 叶子节点（无有效特征）: {most_common_label}\n")
             return TreeNodeCART(label=most_common_label, samples=n_samples, gini=gini, class_distribution=class_dist)
         
-        # 创建节点
         node = TreeNodeCART(
             feature=best_feature,
             threshold=best_threshold,
@@ -279,16 +254,12 @@ class DecisionTreeCART:
         
         # CART二叉分裂（连续特征可以重复使用，离散特征也可以）
         if is_continuous:
-            # 连续特征：按阈值分裂
-            print(f"{indent}左分支: {best_feature} <= {best_threshold:.4f}")
             left_indices = X[best_feature] <= best_threshold
             left_X = X[left_indices]
             left_y = y[left_indices]
             
             if len(left_y) > 0:
                 node.left = self.build_tree(left_X, left_y, available_features, depth + 1)
-            
-            print(f"{indent}右分支: {best_feature} > {best_threshold:.4f}")
             right_indices = X[best_feature] > best_threshold
             right_X = X[right_indices]
             right_y = y[right_indices]
@@ -297,15 +268,12 @@ class DecisionTreeCART:
                 node.right = self.build_tree(right_X, right_y, available_features, depth + 1)
         else:
             # 离散特征：按值分裂（= vs ≠）
-            print(f"{indent}左分支: {best_feature} = {best_threshold}")
             left_indices = X[best_feature] == best_threshold
             left_X = X[left_indices]
             left_y = y[left_indices]
             
             if len(left_y) > 0:
                 node.left = self.build_tree(left_X, left_y, available_features, depth + 1)
-            
-            print(f"{indent}右分支: {best_feature} ≠ {best_threshold}")
             right_indices = X[best_feature] != best_threshold
             right_X = X[right_indices]
             right_y = y[right_indices]
@@ -325,19 +293,7 @@ class DecisionTreeCART:
         X = X.reset_index(drop=True)
         y = y.reset_index(drop=True)
         
-        print("\n" + "=" * 60)
-        print("开始构建CART决策树...")
-        print("=" * 60)
-        print("\n特征类型识别结果:")
-        for feature, ftype in self.feature_types.items():
-            print(f"  {feature}: {ftype}")
-        print()
-        
         self.root = self.build_tree(X, y, self.feature_names)
-        
-        print("=" * 60)
-        print(f"CART决策树训练完成！")
-        print("=" * 60)
     
     def predict_sample(self, x, node):
         """
@@ -420,10 +376,6 @@ class DecisionTreeCART:
 
 # ========== 测试代码 ==========
 if __name__ == "__main__":
-    print("\n" + "=" * 60)
-    print("CART决策树分类器测试 - 西瓜数据集2")
-    print("=" * 60)
-    
     # 加载数据
     train_data = pd.read_csv('Watermelon-train2.csv')
     test_data = pd.read_csv('Watermelon-test2.csv')
@@ -433,10 +385,6 @@ if __name__ == "__main__":
     
     X_test = test_data.drop(['编号', '好瓜'], axis=1)
     y_test = test_data['好瓜']
-    
-    print(f"\n训练集大小: {X_train.shape[0]} 个样本")
-    print(f"测试集大小: {X_test.shape[0]} 个样本")
-    print(f"特征: {X_train.columns.tolist()}")
     
     # 训练CART决策树
     tree = DecisionTreeCART(
@@ -458,10 +406,4 @@ if __name__ == "__main__":
     test_pred = tree.predict(X_test)
     test_acc = np.mean(test_pred == y_test.values)
     print(f"测试集准确率: {test_acc:.2%}")
-    
-    print("\n详细预测结果:")
-    print("-" * 40)
-    for i in range(len(test_pred)):
-        correct = "✓" if test_pred[i] == y_test.iloc[i] else "✗"
-        print(f"样本{i+1}: 真实={y_test.iloc[i]}, 预测={test_pred[i]} {correct}")
 
