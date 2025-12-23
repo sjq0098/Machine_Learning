@@ -336,7 +336,7 @@ class DecisionTreeC45:
             self.root = self.build_tree(X_train, y_train, self.feature_names)
             self._prune_tree(X_val, y_val)
         else:
-        self.root = self.build_tree(X, y, self.feature_names)
+             self.root = self.build_tree(X, y, self.feature_names)
         
         # 归一化特征重要性
         total_importance = sum(self.feature_importances_.values())
