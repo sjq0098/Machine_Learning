@@ -39,7 +39,8 @@ class DecisionTreeC45:
     """
     
     def __init__(self, min_samples_split=2, min_samples_leaf=1, 
-                 max_depth=None, continuous_features=None):
+                 max_depth=None, continuous_features=None, 
+                 prune=False, validation_split=0.2):
         """
         初始化C4.5决策树
         
@@ -48,6 +49,8 @@ class DecisionTreeC45:
             min_samples_leaf: 叶子节点最小样本数
             max_depth: 最大深度（None表示不限制）
             continuous_features: 连续特征名称列表
+            prune: 是否进行后剪枝
+            validation_split: 用于剪枝的验证集比例
         """
         self.root = None
         self.min_samples_split = min_samples_split
@@ -56,6 +59,9 @@ class DecisionTreeC45:
         self.continuous_features = continuous_features
         self.feature_names = None
         self.feature_types = {}
+        self.feature_importances_ = {}  # 特征重要性字典
+        self.prune = prune
+        self.validation_split = validation_split
     
     def calculate_entropy(self, y):
         """
@@ -257,6 +263,14 @@ class DecisionTreeC45:
             most_common_label = Counter(y).most_common(1)[0][0]
             return TreeNodeC45(label=most_common_label, samples=n_samples, class_distribution=class_dist)
         
+        # 计算特征重要性贡献：信息增益率 × 样本数
+        gain_ratio = self.calculate_gain_ratio(X, y, best_feature, best_threshold)
+        
+        # 累加特征重要性
+        if best_feature not in self.feature_importances_:
+            self.feature_importances_[best_feature] = 0.0
+        self.feature_importances_[best_feature] += gain_ratio * n_samples
+        
         is_continuous = (best_threshold is not None)
         node = TreeNodeC45(
             feature=best_feature,
@@ -308,11 +322,32 @@ class DecisionTreeC45:
         """
         self.feature_names = X.columns.tolist()
         self.identify_feature_types(X)
+        self.feature_importances_ = {}  # 重置特征重要性
         
         X = X.reset_index(drop=True)
         y = y.reset_index(drop=True)
         
+        # 如果启用剪枝，分割数据
+        if self.prune and self.validation_split > 0:
+            from sklearn.model_selection import train_test_split
+            X_train, X_val, y_train, y_val = train_test_split(
+                X, y, test_size=self.validation_split, random_state=42, stratify=y if len(y.unique()) > 1 else None
+            )
+            self.root = self.build_tree(X_train, y_train, self.feature_names)
+            self._prune_tree(X_val, y_val)
+        else:
         self.root = self.build_tree(X, y, self.feature_names)
+        
+        # 归一化特征重要性
+        total_importance = sum(self.feature_importances_.values())
+        if total_importance > 0:
+            for feature in self.feature_importances_:
+                self.feature_importances_[feature] /= total_importance
+        else:
+            # 如果没有特征被使用，平均分配
+            n_features = len(self.feature_names)
+            for feature in self.feature_names:
+                self.feature_importances_[feature] = 1.0 / n_features if n_features > 0 else 0.0
     
     def predict_sample(self, x, node):
         """
@@ -390,38 +425,119 @@ class DecisionTreeC45:
                     self.print_tree(child, depth + 1)
                 else:
                     print(f" → 预测: 【{child.label}】 (样本数={child.samples})")
+    
+    def get_feature_importances(self):
+        """
+        获取特征重要性
+        
+        返回:
+            feature_importances: 字典，key为特征名，value为重要性值（已归一化，和为1）
+        """
+        return self.feature_importances_.copy()
+    
+    def _is_leaf(self, node):
+        """判断节点是否为叶子节点"""
+        return node.label is not None
+    
+    def _get_most_common_label(self, node):
+        """获取节点子树中最常见的标签（用于剪枝）"""
+        if self._is_leaf(node):
+            return node.label
+        
+        labels = []
+        if node.is_continuous:
+            if 'left' in node.children:
+                labels.append(self._get_most_common_label(node.children['left']))
+            if 'right' in node.children:
+                labels.append(self._get_most_common_label(node.children['right']))
+        else:
+            for child in node.children.values():
+                labels.append(self._get_most_common_label(child))
+        
+        return Counter(labels).most_common(1)[0][0] if labels else None
+    
+    def _get_prunable_nodes(self, node, parent=None, path=None):
+        """获取所有可剪枝的节点"""
+        if path is None:
+            path = []
+        
+        prunable = []
+        
+        if not self._is_leaf(node):
+            all_children_are_leaves = True
+            if node.is_continuous:
+                if 'left' in node.children and not self._is_leaf(node.children['left']):
+                    all_children_are_leaves = False
+                if 'right' in node.children and not self._is_leaf(node.children['right']):
+                    all_children_are_leaves = False
+            else:
+                for child in node.children.values():
+                    if not self._is_leaf(child):
+                        all_children_are_leaves = False
+                        break
+            
+            if all_children_are_leaves:
+                prunable.append((node, parent, path))
+            else:
+                if node.is_continuous:
+                    if 'left' in node.children:
+                        prunable.extend(self._get_prunable_nodes(node.children['left'], node, path + ['left']))
+                    if 'right' in node.children:
+                        prunable.extend(self._get_prunable_nodes(node.children['right'], node, path + ['right']))
+                else:
+                    for value, child in node.children.items():
+                        prunable.extend(self._get_prunable_nodes(child, node, path + [value]))
+        
+        return prunable
+    
+    def _calculate_accuracy(self, X, y):
+        """计算在验证集上的准确率"""
+        if len(X) == 0:
+            return 0.0
+        predictions = self.predict(X)
+        return np.mean(predictions == y.values)
+    
+    def _prune_tree(self, X_val, y_val):
+        """后剪枝：错误率降低剪枝"""
+        if self.root is None or len(X_val) == 0:
+            return
+        
+        best_accuracy = self._calculate_accuracy(X_val, y_val)
+        improved = True
+        
+        while improved:
+            improved = False
+            prunable_nodes = self._get_prunable_nodes(self.root)
+            prunable_nodes.sort(key=lambda x: len(x[2]), reverse=True)
+            
+            for node, parent, path in prunable_nodes:
+                original_children = node.children.copy()
+                original_label = node.label
+                original_feature = node.feature
+                original_threshold = node.threshold
+                original_is_continuous = node.is_continuous
+                
+                most_common = self._get_most_common_label(node)
+                if most_common is None:
+                    continue
+                
+                node.label = most_common
+                node.children = {}
+                node.feature = None
+                node.threshold = None
+                node.is_continuous = False
+                
+                new_accuracy = self._calculate_accuracy(X_val, y_val)
+                
+                if new_accuracy >= best_accuracy:
+                    best_accuracy = new_accuracy
+                    improved = True
+                else:
+                    node.label = original_label
+                    node.children = original_children
+                    node.feature = original_feature
+                    node.threshold = original_threshold
+                    node.is_continuous = original_is_continuous
 
 
-# ========== 测试代码 ==========
-if __name__ == "__main__":
-    # 加载数据
-    train_data = pd.read_csv('Watermelon-train2.csv')
-    test_data = pd.read_csv('Watermelon-test2.csv')
-    
-    X_train = train_data.drop(['编号', '好瓜'], axis=1)
-    y_train = train_data['好瓜']
-    
-    X_test = test_data.drop(['编号', '好瓜'], axis=1)
-    y_test = test_data['好瓜']
-    
-    # 训练C4.5决策树
-    tree = DecisionTreeC45(
-        min_samples_split=2,
-        min_samples_leaf=1,
-        max_depth=None,
-        continuous_features=['密度']  # 指定连续特征
-    )
-    tree.fit(X_train, y_train)
-    
-    # 可视化
-    tree.print_tree()
-    
-    # 评估
-    train_pred = tree.predict(X_train)
-    train_acc = np.mean(train_pred == y_train.values)
-    print(f"\n训练集准确率: {train_acc:.2%}")
-    
-    test_pred = tree.predict(X_test)
-    test_acc = np.mean(test_pred == y_test.values)
-    print(f"测试集准确率: {test_acc:.2%}")
 

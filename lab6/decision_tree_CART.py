@@ -50,7 +50,8 @@ class DecisionTreeCART:
     """
     
     def __init__(self, min_samples_split=2, min_samples_leaf=1,
-                 max_depth=None, continuous_features=None):
+                 max_depth=None, continuous_features=None,
+                 prune=False, validation_split=0.2):
         """
         初始化CART决策树
         
@@ -59,6 +60,8 @@ class DecisionTreeCART:
             min_samples_leaf: 叶子节点最小样本数
             max_depth: 最大深度
             continuous_features: 连续特征名称列表
+            prune: 是否进行后剪枝
+            validation_split: 用于剪枝的验证集比例
         """
         self.root = None
         self.min_samples_split = min_samples_split
@@ -67,6 +70,9 @@ class DecisionTreeCART:
         self.continuous_features = continuous_features
         self.feature_names = None
         self.feature_types = {}
+        self.feature_importances_ = {}  # 特征重要性字典
+        self.prune = prune
+        self.validation_split = validation_split
     
     def calculate_gini(self, y):
         """
@@ -243,6 +249,15 @@ class DecisionTreeCART:
             most_common_label = Counter(y).most_common(1)[0][0]
             return TreeNodeCART(label=most_common_label, samples=n_samples, gini=gini, class_distribution=class_dist)
         
+        # 计算特征重要性贡献：基尼不纯度减少量 × 样本数
+        gini_split = self.calculate_gini_split(X, y, best_feature, best_threshold, is_continuous)
+        gini_reduction = (gini - gini_split) * n_samples  # 基尼减少量 × 样本数
+        
+        # 累加特征重要性
+        if best_feature not in self.feature_importances_:
+            self.feature_importances_[best_feature] = 0.0
+        self.feature_importances_[best_feature] += gini_reduction
+        
         node = TreeNodeCART(
             feature=best_feature,
             threshold=best_threshold,
@@ -289,11 +304,32 @@ class DecisionTreeCART:
         """
         self.feature_names = X.columns.tolist()
         self.identify_feature_types(X)
+        self.feature_importances_ = {}  # 重置特征重要性
         
         X = X.reset_index(drop=True)
         y = y.reset_index(drop=True)
         
+        # 如果启用剪枝，分割数据
+        if self.prune and self.validation_split > 0:
+            from sklearn.model_selection import train_test_split
+            X_train, X_val, y_train, y_val = train_test_split(
+                X, y, test_size=self.validation_split, random_state=42, stratify=y if len(y.unique()) > 1 else None
+            )
+            self.root = self.build_tree(X_train, y_train, self.feature_names)
+            self._prune_tree(X_val, y_val)
+        else:
         self.root = self.build_tree(X, y, self.feature_names)
+        
+        # 归一化特征重要性
+        total_importance = sum(self.feature_importances_.values())
+        if total_importance > 0:
+            for feature in self.feature_importances_:
+                self.feature_importances_[feature] /= total_importance
+        else:
+            # 如果没有特征被使用，平均分配
+            n_features = len(self.feature_names)
+            for feature in self.feature_names:
+                self.feature_importances_[feature] = 1.0 / n_features if n_features > 0 else 0.0
     
     def predict_sample(self, x, node):
         """
@@ -373,37 +409,102 @@ class DecisionTreeCART:
         
         self.print_tree(node.right, depth + 1, "right")
 
-
-# ========== 测试代码 ==========
-if __name__ == "__main__":
-    # 加载数据
-    train_data = pd.read_csv('Watermelon-train2.csv')
-    test_data = pd.read_csv('Watermelon-test2.csv')
+    def get_feature_importances(self):
+        """
+        获取特征重要性
+        
+        返回:
+            feature_importances: 字典，key为特征名，value为重要性值（已归一化，和为1）
+        """
+        return self.feature_importances_.copy()
     
-    X_train = train_data.drop(['编号', '好瓜'], axis=1)
-    y_train = train_data['好瓜']
+    def _is_leaf(self, node):
+        """判断节点是否为叶子节点"""
+        return node is None or node.label is not None
     
-    X_test = test_data.drop(['编号', '好瓜'], axis=1)
-    y_test = test_data['好瓜']
+    def _get_most_common_label(self, node):
+        """获取节点子树中最常见的标签（用于剪枝）"""
+        if self._is_leaf(node):
+            return node.label if node else None
+        
+        labels = []
+        if node.left:
+            labels.append(self._get_most_common_label(node.left))
+        if node.right:
+            labels.append(self._get_most_common_label(node.right))
+        
+        return Counter(labels).most_common(1)[0][0] if labels else None
     
-    # 训练CART决策树
-    tree = DecisionTreeCART(
-        min_samples_split=2,
-        min_samples_leaf=1,
-        max_depth=5,
-        continuous_features=['密度']
-    )
-    tree.fit(X_train, y_train)
+    def _get_prunable_nodes(self, node, parent=None, path=None):
+        """获取所有可剪枝的节点（CART是二叉树）"""
+        if path is None:
+            path = []
+        
+        prunable = []
+        
+        if not self._is_leaf(node):
+            # 检查左右子节点是否都是叶子节点
+            left_is_leaf = self._is_leaf(node.left)
+            right_is_leaf = self._is_leaf(node.right)
+            
+            if left_is_leaf and right_is_leaf:
+                prunable.append((node, parent, path))
+            else:
+                if node.left:
+                    prunable.extend(self._get_prunable_nodes(node.left, node, path + ['left']))
+                if node.right:
+                    prunable.extend(self._get_prunable_nodes(node.right, node, path + ['right']))
+        
+        return prunable
     
-    # 可视化
-    tree.print_tree()
+    def _calculate_accuracy(self, X, y):
+        """计算在验证集上的准确率"""
+        if len(X) == 0:
+            return 0.0
+        predictions = self.predict(X)
+        return np.mean(predictions == y.values)
     
-    # 评估
-    train_pred = tree.predict(X_train)
-    train_acc = np.mean(train_pred == y_train.values)
-    print(f"\n训练集准确率: {train_acc:.2%}")
-    
-    test_pred = tree.predict(X_test)
-    test_acc = np.mean(test_pred == y_test.values)
-    print(f"测试集准确率: {test_acc:.2%}")
-
+    def _prune_tree(self, X_val, y_val):
+        """后剪枝：错误率降低剪枝（CART二叉树）"""
+        if self.root is None or len(X_val) == 0:
+            return
+        
+        best_accuracy = self._calculate_accuracy(X_val, y_val)
+        improved = True
+        
+        while improved:
+            improved = False
+            prunable_nodes = self._get_prunable_nodes(self.root)
+            prunable_nodes.sort(key=lambda x: len(x[2]), reverse=True)
+            
+            for node, parent, path in prunable_nodes:
+                original_left = node.left
+                original_right = node.right
+                original_label = node.label
+                original_feature = node.feature
+                original_threshold = node.threshold
+                original_is_continuous = node.is_continuous
+                
+                most_common = self._get_most_common_label(node)
+                if most_common is None:
+                    continue
+                
+                node.label = most_common
+                node.left = None
+                node.right = None
+                node.feature = None
+                node.threshold = None
+                node.is_continuous = False
+                
+                new_accuracy = self._calculate_accuracy(X_val, y_val)
+                
+                if new_accuracy >= best_accuracy:
+                    best_accuracy = new_accuracy
+                    improved = True
+                else:
+                    node.label = original_label
+                    node.left = original_left
+                    node.right = original_right
+                    node.feature = original_feature
+                    node.threshold = original_threshold
+                    node.is_continuous = original_is_continuous

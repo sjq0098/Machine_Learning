@@ -221,15 +221,21 @@ class DecisionTreeContinuous(DecisionTreeID3):
     支持连续特征的决策树分类器
     """
     
-    def __init__(self, min_samples_split=2, continuous_features=None):
+    def __init__(self, min_samples_split=2, continuous_features=None, 
+                 prune=False, validation_split=0.2):
         """
         初始化决策树
             min_samples_split: 分裂所需的最小样本数
             continuous_features: 连续特征名称列表（如果为None则自动判断）
+            prune: 是否进行后剪枝
+            validation_split: 用于剪枝的验证集比例
         """
         super().__init__(min_samples_split)
         self.continuous_features = continuous_features
         self.feature_types = {}  # 存储每个特征的类型
+        self.feature_importances_ = {}  # 特征重要性字典
+        self.prune = prune
+        self.validation_split = validation_split
     
     def identify_feature_types(self, X):
         """
@@ -327,6 +333,18 @@ class DecisionTreeContinuous(DecisionTreeID3):
             most_common_label = Counter(y).most_common(1)[0][0]
             return TreeNodeContinuous(label=most_common_label)
         
+        # 计算特征重要性贡献：信息增益 × 样本数
+        n_samples = len(y)
+        if best_threshold is not None:
+            gain = self.calculate_information_gain_continuous(X, y, best_feature, best_threshold)
+        else:
+            gain = self.calculate_information_gain(X, y, best_feature)
+        
+        # 累加特征重要性
+        if best_feature not in self.feature_importances_:
+            self.feature_importances_[best_feature] = 0.0
+        self.feature_importances_[best_feature] += gain * n_samples
+        
         is_continuous = (best_threshold is not None)
         node = TreeNodeContinuous(
             feature=best_feature, 
@@ -383,9 +401,31 @@ class DecisionTreeContinuous(DecisionTreeID3):
         """
         self.feature_names = X.columns.tolist()
         self.identify_feature_types(X)
+        self.feature_importances_ = {}  # 重置特征重要性
         X = X.reset_index(drop=True)
         y = y.reset_index(drop=True)
+        
+        # 如果启用剪枝，分割数据
+        if self.prune and self.validation_split > 0:
+            from sklearn.model_selection import train_test_split
+            X_train, X_val, y_train, y_val = train_test_split(
+                X, y, test_size=self.validation_split, random_state=42, stratify=y if len(y.unique()) > 1 else None
+            )
+            self.root = self.build_tree(X_train, y_train, self.feature_names)
+            self._prune_tree(X_val, y_val)
+        else:
         self.root = self.build_tree(X, y, self.feature_names)
+        
+        # 归一化特征重要性
+        total_importance = sum(self.feature_importances_.values())
+        if total_importance > 0:
+            for feature in self.feature_importances_:
+                self.feature_importances_[feature] /= total_importance
+        else:
+            # 如果没有特征被使用，平均分配
+            n_features = len(self.feature_names)
+            for feature in self.feature_names:
+                self.feature_importances_[feature] = 1.0 / n_features if n_features > 0 else 0.0
     
     def predict_sample(self, x, node):
         """
@@ -456,5 +496,135 @@ class DecisionTreeContinuous(DecisionTreeID3):
                     self.print_tree(child, depth + 1, value)
                 else:
                     print(f" → 预测: 【{child.label}】")
+
+    def get_feature_importances(self):
+        """
+        获取特征重要性
+        
+        返回:
+            feature_importances: 字典，key为特征名，value为重要性值（已归一化，和为1）
+        """
+        return self.feature_importances_.copy()
+    
+    def _is_leaf(self, node):
+        """判断节点是否为叶子节点"""
+        return node.label is not None
+    
+    def _get_most_common_label(self, node):
+        """获取节点子树中最常见的标签（用于剪枝）"""
+        if self._is_leaf(node):
+            return node.label
+        
+        # 收集所有叶子节点的标签
+        labels = []
+        if node.is_continuous:
+            if 'left' in node.children:
+                labels.append(self._get_most_common_label(node.children['left']))
+            if 'right' in node.children:
+                labels.append(self._get_most_common_label(node.children['right']))
+        else:
+            for child in node.children.values():
+                labels.append(self._get_most_common_label(child))
+        
+        return Counter(labels).most_common(1)[0][0] if labels else None
+    
+    def _get_prunable_nodes(self, node, parent=None, path=None):
+        """
+        获取所有可剪枝的节点（内部节点，其所有子节点都是叶子节点）
+        返回: [(node, parent, path), ...]
+        """
+        if path is None:
+            path = []
+        
+        prunable = []
+        
+        if not self._is_leaf(node):
+            # 检查所有子节点是否都是叶子节点
+            all_children_are_leaves = True
+            if node.is_continuous:
+                if 'left' in node.children and not self._is_leaf(node.children['left']):
+                    all_children_are_leaves = False
+                if 'right' in node.children and not self._is_leaf(node.children['right']):
+                    all_children_are_leaves = False
+            else:
+                for child in node.children.values():
+                    if not self._is_leaf(child):
+                        all_children_are_leaves = False
+                        break
+            
+            if all_children_are_leaves:
+                prunable.append((node, parent, path))
+            else:
+                # 递归检查子节点
+                if node.is_continuous:
+                    if 'left' in node.children:
+                        prunable.extend(self._get_prunable_nodes(node.children['left'], node, path + ['left']))
+                    if 'right' in node.children:
+                        prunable.extend(self._get_prunable_nodes(node.children['right'], node, path + ['right']))
+                else:
+                    for value, child in node.children.items():
+                        prunable.extend(self._get_prunable_nodes(child, node, path + [value]))
+        
+        return prunable
+    
+    def _calculate_accuracy(self, X, y):
+        """计算在验证集上的准确率"""
+        if len(X) == 0:
+            return 0.0
+        predictions = self.predict(X)
+        return np.mean(predictions == y.values)
+    
+    def _prune_tree(self, X_val, y_val):
+        """
+        后剪枝：错误率降低剪枝（Reduced Error Pruning）
+        从叶子节点开始，自底向上地尝试剪枝
+        """
+        if self.root is None or len(X_val) == 0:
+            return
+        
+        best_accuracy = self._calculate_accuracy(X_val, y_val)
+        improved = True
+        
+        while improved:
+            improved = False
+            prunable_nodes = self._get_prunable_nodes(self.root)
+            
+            # 按深度从深到浅排序（先剪深层节点）
+            prunable_nodes.sort(key=lambda x: len(x[2]), reverse=True)
+            
+            for node, parent, path in prunable_nodes:
+                # 保存原始状态（深拷贝关键属性）
+                import copy
+                original_children = copy.deepcopy(node.children)
+                original_label = node.label
+                original_feature = node.feature
+                original_threshold = node.threshold
+                original_is_continuous = node.is_continuous
+                
+                # 尝试剪枝：将节点变为叶子节点
+                most_common = self._get_most_common_label(node)
+                if most_common is None:
+                    continue
+                
+                node.label = most_common
+                node.children = {}
+                node.feature = None
+                node.threshold = None
+                node.is_continuous = False
+                
+                # 计算剪枝后的准确率
+                new_accuracy = self._calculate_accuracy(X_val, y_val)
+                
+                if new_accuracy >= best_accuracy:
+                    # 剪枝后准确率不降低，保留剪枝
+                    best_accuracy = new_accuracy
+                    improved = True
+                else:
+                    # 剪枝后准确率降低，恢复原状
+                    node.label = original_label
+                    node.children = original_children
+                    node.feature = original_feature
+                    node.threshold = original_threshold
+                    node.is_continuous = original_is_continuous
 
 
